@@ -10,7 +10,6 @@ import { H2, LabelMedium } from "@/components/typography";
 import { BACKEND_URL, Sort } from "@/lib/api";
 import { UserRole } from "@/lib/user";
 import { useAuth } from "@/auth";
-import { EventSource } from "eventsource";
 import z from "zod";
 import { Control } from "./-components/control";
 import { HistoryList } from "./-components/history-list";

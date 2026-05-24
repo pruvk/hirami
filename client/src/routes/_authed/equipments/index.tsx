@@ -10,7 +10,6 @@ import { useEffect, useState, type JSX } from "react";
 import { BorrowEquipmentForm } from "./-components/borrow-equipment-form";
 import { useAuth } from "@/auth";
 import { UserRole } from "@/lib/user";
-import { EventSource } from "eventsource";
 import { CatalogHeader } from "./-components/catalog-header";
 import { CatalogSearch } from "./-components/catalog-search";
 import z from "zod";

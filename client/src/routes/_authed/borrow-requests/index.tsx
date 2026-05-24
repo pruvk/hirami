@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { format } from "date-fns";
-import { EventSource } from "eventsource";
 import { type JSX, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/auth";

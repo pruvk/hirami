@@ -31,7 +31,7 @@ type Repository interface {
 	updateBorrowRequest(ctx context.Context, arg updateBorrowRequest) (updateBorrowResponse, error)
 
 	createReturnRequest(ctx context.Context, arg createReturnRequest) (createReturnResponse, error)
-	confirmReturnRequest(ctx context.Context, arg confirmReturnRequest) (confirmReturnRequest, error)
+	confirmReturnRequest(ctx context.Context, arg confirmReturnRequest) (confirmReturnResponse, error)
 	getReturnRequests(ctx context.Context, params getReturnRequestParams) ([]returnRequest, error)
 	getReturnRequestByID(ctx context.Context, id string) (returnRequest, error)
 	getReturnRequestByOTP(ctx context.Context, otp string) (returnRequest, error)
@@ -1046,6 +1046,7 @@ type reviewBorrowResponse struct {
 	ReviewedBy      user.BasicInfo            `json:"reviewedBy"`
 	Remarks         *string                   `json:"remarks"`
 	Status          borrowRequestStatusDetail `json:"status"`
+	BorrowerID      string                    `json:"borrowerId"`
 }
 
 func (r *repository) reviewBorrowRequest(ctx context.Context, arg reviewBorrowRequest) (reviewBorrowResponse, error) {
@@ -1061,9 +1062,9 @@ func (r *repository) reviewBorrowRequest(ctx context.Context, arg reviewBorrowRe
 		UPDATE borrow_request
 		SET borrow_request_status_id = $1, reviewed_by = $2, remarks = $3, reviewed_at = now()
 		WHERE borrow_request_id = $4
-		RETURNING borrow_request_id, borrow_request_status_id 
+		RETURNING borrow_request_id, borrow_request_status_id, requested_by
 	)
-	SELECT 
+	SELECT
 		reviewed_request.borrow_request_id,
 		jsonb_build_object(
 			'id', borrow_request_status.borrow_request_status_id,
@@ -1076,7 +1077,8 @@ func (r *repository) reviewBorrowRequest(ctx context.Context, arg reviewBorrowRe
 			'middleName', person.middle_name,
 			'lastName', person.last_name,
 			'avatarUrl', person.avatar_url
-		) AS reviewed_by
+		) AS reviewed_by,
+		reviewed_request.requested_by AS borrower_id
 	FROM reviewed_request
 	JOIN borrow_request_status USING (borrow_request_status_id)
 	CROSS JOIN person
@@ -1098,6 +1100,7 @@ func (r *repository) reviewBorrowRequest(ctx context.Context, arg reviewBorrowRe
 		&res.BorrowRequestID,
 		&res.Status,
 		&res.ReviewedBy,
+		&res.BorrowerID,
 	); err != nil {
 		return reviewBorrowResponse{}, err
 	}
@@ -2039,12 +2042,17 @@ type confirmReturnRequest struct {
 	Remarks         *string `json:"remarks"`
 }
 
+type confirmReturnResponse struct {
+	ReturnRequestID string `json:"returnRequestId"`
+	BorrowerID      string `json:"borrowerId"`
+}
+
 var errReturnRequestAlreadyConfirmed = fmt.Errorf("return request is already confirmed")
 
-func (r *repository) confirmReturnRequest(ctx context.Context, arg confirmReturnRequest) (confirmReturnRequest, error) {
+func (r *repository) confirmReturnRequest(ctx context.Context, arg confirmReturnRequest) (confirmReturnResponse, error) {
 	tx, err := r.querier.Begin(ctx)
 	if err != nil {
-		return confirmReturnRequest{}, err
+		return confirmReturnResponse{}, err
 	}
 	defer tx.Rollback(ctx)
 
@@ -2058,20 +2066,21 @@ func (r *repository) confirmReturnRequest(ctx context.Context, arg confirmReturn
 	`
 	var exists bool
 	if err := tx.QueryRow(ctx, checkQuery, arg.ReturnRequestID).Scan(&exists); err != nil {
-		return confirmReturnRequest{}, err
+		return confirmReturnResponse{}, err
 	}
 	if exists {
-		return confirmReturnRequest{}, errReturnRequestAlreadyConfirmed
+		return confirmReturnResponse{}, errReturnRequestAlreadyConfirmed
 	}
 
 	borrowRequestQuery := `
-	SELECT borrow_request_id 
-	FROM return_request
-	WHERE return_request_id = $1
+	SELECT rr.borrow_request_id, br.requested_by
+	FROM return_request rr
+	JOIN borrow_request br ON br.borrow_request_id = rr.borrow_request_id
+	WHERE rr.return_request_id = $1
 	`
-	var borrowRequestID string
-	if err := tx.QueryRow(ctx, borrowRequestQuery, arg.ReturnRequestID).Scan(&borrowRequestID); err != nil {
-		return confirmReturnRequest{}, err
+	var borrowRequestID, borrowerID string
+	if err := tx.QueryRow(ctx, borrowRequestQuery, arg.ReturnRequestID).Scan(&borrowRequestID, &borrowerID); err != nil {
+		return confirmReturnResponse{}, err
 	}
 
 	itemsQuery := `
@@ -2084,7 +2093,7 @@ func (r *repository) confirmReturnRequest(ctx context.Context, arg confirmReturn
 	`
 	itemRows, err := tx.Query(ctx, itemsQuery, arg.ReturnRequestID)
 	if err != nil {
-		return confirmReturnRequest{}, err
+		return confirmReturnResponse{}, err
 	}
 
 	type returnItem struct {
@@ -2097,7 +2106,7 @@ func (r *repository) confirmReturnRequest(ctx context.Context, arg confirmReturn
 	for itemRows.Next() {
 		var item returnItem
 		if err := itemRows.Scan(&item.returnRequestItemID, &item.borrowRequestItemID, &item.quantity); err != nil {
-			return confirmReturnRequest{}, err
+			return confirmReturnResponse{}, err
 		}
 		items = append(items, item)
 	}
@@ -2119,11 +2128,11 @@ func (r *repository) confirmReturnRequest(ctx context.Context, arg confirmReturn
 		`
 		var remainingQuantity int
 		if err := tx.QueryRow(ctx, remainingQuery, item.borrowRequestItemID).Scan(&remainingQuantity); err != nil {
-			return confirmReturnRequest{}, err
+			return confirmReturnResponse{}, err
 		}
 
 		if item.quantity > remainingQuantity {
-			return confirmReturnRequest{}, fmt.Errorf("return quantity (%d) exceeds remaining borrowed quantity (%d) for item %s",
+			return confirmReturnResponse{}, fmt.Errorf("return quantity (%d) exceeds remaining borrowed quantity (%d) for item %s",
 				item.quantity, remainingQuantity, item.borrowRequestItemID)
 		}
 
@@ -2141,7 +2150,7 @@ func (r *repository) confirmReturnRequest(ctx context.Context, arg confirmReturn
 		LIMIT $3
 		`
 		if _, err := tx.Exec(ctx, transactionQuery, item.returnRequestItemID, item.borrowRequestItemID, item.quantity); err != nil {
-			return confirmReturnRequest{}, err
+			return confirmReturnResponse{}, err
 		}
 
 		updateEquipmentQuery := `
@@ -2156,7 +2165,7 @@ func (r *repository) confirmReturnRequest(ctx context.Context, arg confirmReturn
         `
 
 		if _, err := tx.Exec(ctx, updateEquipmentQuery, available, item.returnRequestItemID); err != nil {
-			return confirmReturnRequest{}, err
+			return confirmReturnResponse{}, err
 		}
 	}
 
@@ -2178,7 +2187,7 @@ func (r *repository) confirmReturnRequest(ctx context.Context, arg confirmReturn
 	`
 	var isAllReturned bool
 	if err := tx.QueryRow(ctx, allReturnedQuery, borrowRequestID).Scan(&isAllReturned); err != nil {
-		return confirmReturnRequest{}, err
+		return confirmReturnResponse{}, err
 	}
 
 	if isAllReturned {
@@ -2188,7 +2197,7 @@ func (r *repository) confirmReturnRequest(ctx context.Context, arg confirmReturn
 		WHERE borrow_request_id = $2
 		`
 		if _, err := tx.Exec(ctx, updateStatusQuery, returned, borrowRequestID); err != nil {
-			return confirmReturnRequest{}, err
+			return confirmReturnResponse{}, err
 		}
 	}
 
@@ -2199,14 +2208,14 @@ func (r *repository) confirmReturnRequest(ctx context.Context, arg confirmReturn
 	`
 
 	if _, err := tx.Exec(ctx, updateReturnRequestItemQuery, arg.ReviewedBy, arg.Remarks, arg.ReturnRequestID); err != nil {
-		return confirmReturnRequest{}, err
+		return confirmReturnResponse{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return confirmReturnRequest{}, err
+		return confirmReturnResponse{}, err
 	}
 
-	return arg, nil
+	return confirmReturnResponse{ReturnRequestID: arg.ReturnRequestID, BorrowerID: borrowerID}, nil
 }
 
 type returnRequest struct {
