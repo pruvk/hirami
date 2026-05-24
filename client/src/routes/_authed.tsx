@@ -2,7 +2,6 @@ import { Navbar } from "@/components/navbar";
 import { BACKEND_URL } from "@/lib/api";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { useEffect, type JSX } from "react";
-import { EventSource } from "eventsource";
 import {
 	BorrowRequestStatus,
 	type ReviewBorrowResponse,
@@ -45,8 +44,9 @@ function RouteComponent(): JSX.Element {
 
 		const eventSource = new EventSource(`${BACKEND_URL}/events`);
 
-		function handleEvent(e: MessageEvent<string>): void {
+		function handleReviewEvent(e: MessageEvent<string>): void {
 			const res = JSON.parse(e.data) as ReviewBorrowResponse;
+			if (res.borrowerId !== auth.user?.id) return;
 			if (res.status.code === BorrowRequestStatus.Approved) {
 				toast.success("Your borrow request has been approved.", {
 					duration: Number.POSITIVE_INFINITY,
@@ -60,15 +60,31 @@ function RouteComponent(): JSX.Element {
 			});
 		}
 
+		function handleReturnConfirmEvent(e: MessageEvent<string>): void {
+			const res = JSON.parse(e.data) as { borrowerId: string };
+			if (res.borrowerId !== auth.user?.id) return;
+			toast.success("Your return has been confirmed.", {
+				duration: Number.POSITIVE_INFINITY,
+			});
+		}
+
 		eventSource.addEventListener(
 			EquipmentServerEvent.BorrowRequestReview,
-			handleEvent,
+			handleReviewEvent,
+		);
+		eventSource.addEventListener(
+			EquipmentServerEvent.ReturnRequestConfirm,
+			handleReturnConfirmEvent,
 		);
 
 		return () => {
 			eventSource.removeEventListener(
 				EquipmentServerEvent.BorrowRequestReview,
-				handleEvent,
+				handleReviewEvent,
+			);
+			eventSource.removeEventListener(
+				EquipmentServerEvent.ReturnRequestConfirm,
+				handleReturnConfirmEvent,
 			);
 			eventSource.close();
 		};

@@ -8,7 +8,6 @@ import {
 	returnRequestsQuery,
 	equipmentNamesQuery,
 } from "@/lib/equipment/api";
-import { EventSource } from "eventsource";
 import { ReturnHeader } from "./-components/return-header";
 import z from "zod";
 import { ReturnTab } from "./-model";
@@ -86,7 +85,9 @@ function RouteComponent(): JSX.Element {
 	useEffect(() => {
 		const eventSource = new EventSource(`${BACKEND_URL}/events`);
 
-		function handleEvent(_: MessageEvent): void {
+		function handleEvent(e: MessageEvent<string>): void {
+			const res = JSON.parse(e.data) as { borrowerId: string };
+			if (res.borrowerId !== auth.user?.id) return;
 			queryClient.invalidateQueries(
 				getBorrowedItemsQuery({
 					userId: auth.user?.id,

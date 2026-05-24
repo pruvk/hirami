@@ -10,7 +10,6 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import { Drawer } from "@/components/ui/drawer";
 import { BACKEND_URL } from "@/lib/api";
 import { H2, TitleSmall } from "@/components/typography";
-import { EventSource } from "eventsource";
 import QrScanner from "qr-scanner";
 import { Failed } from "@/components/failed";
 import { Borrow } from "./-components/borrow";

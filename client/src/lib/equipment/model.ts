@@ -160,6 +160,7 @@ export const reviewBorrowResponseSchema = z.object({
 	reviewedBy: userBasicInfoSchema,
 	remarks: z.string().nullable(),
 	status: enumDetailSchema(BorrowRequestStatus),
+	borrowerId: z.string(),
 });
 export type ReviewBorrowResponse = z.infer<typeof reviewBorrowResponseSchema>;
 

@@ -6,7 +6,7 @@ import { H1, H2, LabelMedium } from "@/components/typography";
 import { Button } from "@/components/ui/button";
 import { DownloadIcon } from "lucide-react";
 import { BACKEND_URL, Sort } from "@/lib/api";
-import { EventSource } from "eventsource";
+import { getCookie } from "@/lib/cookie";
 import z from "zod";
 import { Control } from "./-components/control";
 import { ManagerHistoryList } from "./-components/manager-history-list";
@@ -78,7 +78,7 @@ function RouteComponent() {
 						variant="outline"
 						size="sm"
 						className="gap-2 hidden md:flex"
-						onClick={() => {
+						onClick={async () => {
 							const url = new URL(`${BACKEND_URL}/borrow-history/pdf`);
 							if (search.category)
 								url.searchParams.append("category", search.category);
@@ -88,7 +88,18 @@ function RouteComponent() {
 							if (search.startDate) url.searchParams.append("startDate", search.startDate);
 							if (search.endDate) url.searchParams.append("endDate", search.endDate);
 							if (search.equipmentIds) url.searchParams.append("equipmentIds", search.equipmentIds);
-							window.open(url.toString(), "_blank");
+							const token = getCookie("session");
+							const res = await fetch(url.toString(), {
+								headers: token ? { Authorization: `Bearer ${token}` } : {},
+							});
+							if (!res.ok) return;
+							const blob = await res.blob();
+							const blobUrl = URL.createObjectURL(blob);
+							const a = document.createElement("a");
+							a.href = blobUrl;
+							a.download = "borrow_history.pdf";
+							a.click();
+							URL.revokeObjectURL(blobUrl);
 						}}
 					>
 						<DownloadIcon className="size-4" />
